@@ -177,11 +177,11 @@ Allows patients with limited mobility or reach to trigger requests hands-free us
 
 | Screen | Description |
 | :--- | :--- |
-| **Patient View** | `assets/screenshots/patient-view.png` — Main high-contrast touch interface |
-| **Gesture Camera** | `assets/screenshots/gesture-camera.png` — Live gesture detection with landmark feedback |
-| **Care Team Station**| `assets/screenshots/care-team.png` — Nurse station queue and urgency alerts |
-| **Staff PIN Entry** | `assets/screenshots/staff-pin.png` — Demo staff authorization modal |
-| **Patient Response** | `assets/screenshots/patient-response.png` — Visual response display received by patient |
+| **Patient View** | `assets/screenshots/patient-view.jpg`- Main high-contrast touch interface |
+| **Gesture Camera** | `assets/screenshots/gesture-camera.jpg` — Live gesture detection with landmark feedback |
+| **Care Team Station**| `assets/screenshots/care-team.jpg` — Nurse station queue and urgency alerts |
+| **Staff PIN Entry** | `assets/screenshots/staff-pin.jpg` — Demo staff authorization modal |
+| **Patient Response** | `assets/screenshots/patient-response.jpg` — Visual response display received by patient |
 
 ---
 
