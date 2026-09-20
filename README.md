@@ -4,7 +4,7 @@
 
 **Hack Devengers 2.0 · Individual Project**  
 **Developer:** Bhadra Abu  
-**Live Demo:** [https://deafcare.netlify4u.app](https://deafcare.netlify4u.app)
+**Live Demo:** [https://deafcare4u.netlify.app](https://deafcare4u.netlify.app)
 
 ---
 
@@ -187,7 +187,7 @@ Allows patients with limited mobility or reach to trigger requests hands-free us
 
 ## Live Demo
 
-* **URL:** [https://deafcare.netlify4u.app](https://deafcare.netlify4u.app)
+* **URL:** [https://deafcare4u.netlify.app](https://deafcare4u.netlify.app)
 
 ### Rapid Testing Flow:
 1. Open the **Live Demo** in two separate browser tabs side-by-side.
