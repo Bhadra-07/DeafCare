@@ -5,7 +5,7 @@
 **Hack Devengers 2.0 · Individual Project**  
 **Developer:** Bhadra Abu  
 **Repository:** [https://github.com/Bhadra-07/DeafCare.git](https://github.com/Bhadra-07/DeafCare.git)  
-**Live Demo:** [https://deafcare.netlify.app](https://deafcare.netlify.app)  
+**Live Demo:**   https://deafcare4u.netlify.app
 
 ---
 
