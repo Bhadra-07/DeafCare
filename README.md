@@ -34,19 +34,17 @@ Without direct visual and gesture-assisted communication tools, patients experie
 DeafCare bridges the communication gap by establishing a direct, visual, two-way loop between the patient and the care team:
 
 ```
-[ Patient Interface ]
-       │  (Large Visual Buttons OR Controlled Gestures)
-       ▼
-[ DeafCare Request Engine ]
-       │  (Urgency Classification & Local Signal Broadcast)
-       ▼
-[ Care Team / Nurse Station ]
-       │  (High-Urgency Visual/Audio Alert & Response Selection)
-       ▼
-[ Visual Response Dispatch ]
-       │
-       ▼
-[ Patient Interface ] ──► (Real-Time Visual Acknowledgment)
+### Patient View
+![Patient View](assets/screenshots/patient-view.jpg)
+
+### Gesture Camera
+![Gesture Camera](assets/screenshots/gesture-camera.jpg)
+
+### Care Team
+![Care Team](assets/screenshots/care-team.jpg)
+
+### Staff PIN
+![Staff PIN](assets/screenshots/staff-pin.jpg)
 ```
 
 **Key Principles:**
