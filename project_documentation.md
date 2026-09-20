@@ -4,7 +4,7 @@
 * **Project:** DeafCare
 * **Author:** Bhadra Abu
 * **Hackathon:** Hack Devengers 2.0
-* **Demo URL:** https://deafcare.netlify4u.app
+* **Demo URL:** https://deafcare4u.netlify.app
 
 ---
 
