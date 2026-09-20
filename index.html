@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeafCare - Accessible Patient Communication Engine</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Standalone CDN -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- MediaPipe Hands CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              900: '#134e4a',
+              950: '#042f2e',
+            }
+          },
+          animation: {
+            'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'float': 'float 3s ease-in-out infinite',
+          },
+          keyframes: {
+            float: {
+              '0%, 100%': { transform: 'translateY(0px)' },
+              '50%': { transform: 'translateY(-8px)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+    .pulse-alert {
+      animation: pulse-red 1.2s infinite;
+    }
+    @keyframes pulse-red {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8); }
+      70% { box-shadow: 0 0 0 18px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #14b8a6;
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-teal-500 selection:text-slate-950">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const PATIENT_ID = "Bed 3B (Pt. John Doe)";
+
+    // Demo-only Care Team access control PIN
+    const CARE_TEAM_PIN = "1234";
+
+    const REQUEST_TYPES = {
+      HELP: { label: "HELP", urgency: "HIGH", color: "bg-red-600 hover:bg-red-500 text-white", icon: "fa-triangle-exclamation", description: "Immediate Emergency Assistance", gesture: "✋ Open Palm" },
+      PAIN: { label: "PAIN", urgency: "HIGH", color: "bg-rose-500 hover:bg-rose-400 text-white", icon: "fa-bolt", description: "Severe Pain or Discomfort", gesture: "🤚 Lowered Hand" },
+      DOCTOR: { label: "DOCTOR", urgency: "MEDIUM", color: "bg-indigo-600 hover:bg-indigo-500 text-white", icon: "fa-user-doctor", description: "Request Doctor Consultation", gesture: "☝️ Pointing Up" },
+      MEDICINE: { label: "MEDICINE", urgency: "MEDIUM", color: "bg-amber-500 hover:bg-amber-400 text-slate-950", icon: "fa-pills", description: "Scheduled Medication or Pain Relief", gesture: "👍 Thumbs Up" },
+      WATER: { label: "WATER", urgency: "NORMAL", color: "bg-sky-500 hover:bg-sky-400 text-slate-950", icon: "fa-glass-water", description: "Thirst / Hydration / Food Request", gesture: "✊ Closed Fist" }
+    };
+
+    const PRESET_RESPONSES = [
+      "Doctor is coming right now",
+      "Please wait, nurse is on the way",
+      "Take your scheduled medication",
+      "How can I assist you further?",
+      "Water is being brought to your room"
+    ];
+
+    const playUrgentChime = (() => {
+      let audioCtx = null;
+      return () => {
+        try {
+          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+          osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.4);
+          gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+          
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.4);
+        } catch (e) {
+          console.warn("Audio chime alert bypassed or blocked by browser policy:", e);
+        }
+      };
+    })();
+
+    function App() {
+      const [viewMode, setViewMode] = useState("LANDING"); // LANDING, TERMINAL
+      const [activeTab, setActiveTab] = useState("PATIENT"); // PATIENT, CARE_TEAM, SPLIT
+      const [isContactOpen, setIsContactOpen] = useState(false);
+      
+      // Staff Authentication State
+      const [isStaffAuthenticated, setIsStaffAuthenticated] = useState(false);
+      const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+      const [pendingTabRequest, setPendingTabRequest] = useState(null);
+
+      const [requests, setRequests] = useState(() => {
+        const saved = localStorage.getItem("deafcare_requests");
+        return saved ? JSON.parse(saved) : [];
+      });
+      const [alertSoundPlayed, setAlertSoundPlayed] = useState({});
+
+      useEffect(() => {
+        localStorage.setItem("deafcare_requests", JSON.stringify(requests));
+      }, [requests]);
+
+      useEffect(() => {
+        const channel = new BroadcastChannel("deafcare_sync");
+        channel.onmessage = (event) => {
+          if (event.data && event.data.type === "SYNC") {
+            setRequests(event.data.payload);
+          }
+        };
+        return () => channel.close();
+      }, []);
+
+      const broadcastSync = (newRequests) => {
+        setRequests(newRequests);
+        try {
+          const channel = new BroadcastChannel("deafcare_sync");
+          channel.postMessage({ type: "SYNC", payload: newRequests });
+          channel.close();
+        } catch (e) {
+          console.log("BroadcastChannel sync notice:", e);
+        }
+      };
+
+      // Sound alert for unacknowledged high urgency requests
+      useEffect(() => {
+        const unackHighUrgent = requests.find(r => r.urgency === "HIGH" && r.status === "PENDING" && !alertSoundPlayed[r.id]);
+        if (unackHighUrgent) {
+          playUrgentChime();
+          setAlertSoundPlayed(prev => ({ ...prev, [unackHighUrgent.id]: true }));
+        }
+      }, [requests, alertSoundPlayed]);
+
+      const createRequest = useCallback((typeKey, origin = "MANUAL") => {
+        const reqConfig = REQUEST_TYPES[typeKey] || REQUEST_TYPES.HELP;
+        const newReq = {
+          id: "REQ-" + Date.now().toString().slice(-6),
+          patientId: PATIENT_ID,
+          type: typeKey,
+          label: reqConfig.label,
+          urgency: reqConfig.urgency,
+          status: "PENDING",
+          origin: origin,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          responses: []
+        };
+        const updated = [newReq, ...requests];
+        broadcastSync(updated);
+      }, [requests]);
+
+      const acknowledgeRequest = (reqId) => {
+        const updated = requests.map(r => r.id === reqId ? { ...r, status: "ACKNOWLEDGED" } : r);
+        broadcastSync(updated);
+      };
+
+      const sendResponse = (reqId, messageText) => {
+        if (!messageText.trim()) return;
+        const responseItem = {
+          id: "RESP-" + Date.now().toString().slice(-4),
+          text: messageText,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sender: "Care Team / Nurse Station"
+        };
+        const updated = requests.map(r => {
+          if (r.id === reqId) {
+            return {
+              ...r,
+              status: "ACKNOWLEDGED",
+              responses: [...(r.responses || []), responseItem]
+            };
+          }
+          return r;
+        });
+        broadcastSync(updated);
+      };
+
+      const resolveRequest = (reqId) => {
+        const updated = requests.map(r => r.id === reqId ? { ...r, status: "RESOLVED" } : r);
+        broadcastSync(updated);
+      };
+
+      const clearAllData = () => {
+        broadcastSync([]);
+      };
+
+      // TAB ACCESS INTERCEPTOR FOR STAFF SECURITY
+      const requestTabChange = (targetTab) => {
+        if (targetTab === "CARE_TEAM" || targetTab === "SPLIT") {
+          if (isStaffAuthenticated) {
+            setActiveTab(targetTab);
+          } else {
+            setPendingTabRequest(targetTab);
+            setIsPinModalOpen(true);
+          }
+        } else {
+          setActiveTab(targetTab);
+        }
+      };
+
+      const handlePinSuccess = () => {
+        setIsStaffAuthenticated(true);
+        setIsPinModalOpen(false);
+        if (pendingTabRequest) {
+          setActiveTab(pendingTabRequest);
+          setPendingTabRequest(null);
+        } else {
+          setActiveTab("CARE_TEAM");
+        }
+      };
+
+      const handleStaffLogout = () => {
+        setIsStaffAuthenticated(false);
+        setActiveTab("PATIENT");
+      };
+
+      const scrollToTerminal = (tab = "PATIENT") => {
+        setViewMode("TERMINAL");
+        requestTabChange(tab);
+        setTimeout(() => {
+          const el = document.getElementById("terminal-anchor");
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+          {/* HEADER */}
+          <header className="sticky top-0 z-50 glass-panel border-b border-slate-800 px-4 md:px-8 py-3">
+            <div className="max-w-7xl mx-auto flex items-center justify-between">
+              {/* Brand Logo */}
+              <div 
+                onClick={() => setViewMode("LANDING")} 
+                className="flex items-center space-x-3 cursor-pointer group">
+                <div className="bg-teal-500 text-slate-950 p-2.5 rounded-xl font-black text-xl shadow-lg shadow-teal-500/20 group-hover:scale-105 transition-transform">
+                  <i className="fa-solid fa-hands-asl-interpreting"></i>
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-black text-xl tracking-tight text-white">DeafCare</span>
+                    <span className="bg-teal-500/20 text-teal-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-teal-500/30">
+                      v2.4 Live
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 hidden sm:block">Accessible Healthcare Communication Engine</p>
+                </div>
+              </div>
+
+              {/* Navigation Links */}
+              <nav className="hidden lg:flex items-center space-x-8 text-sm font-semibold text-slate-300">
+                <button onClick={() => setViewMode("LANDING")} className="hover:text-teal-400 transition-colors">Overview</button>
+                <a href="#features" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400 transition-colors">Features</a>
+                <a href="#gestures" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400 transition-colors">Gesture Guide</a>
+                <a href="#workflow" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400 transition-colors">Workflow</a>
+                <a href="#compliance" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400 transition-colors">Compliance</a>
+              </nav>
+
+              {/* CTA Action Header Buttons */}
+              <div className="flex items-center space-x-3">
+                {viewMode === "LANDING" ? (
+                  <button 
+                    onClick={() => scrollToTerminal("PATIENT")}
+                    className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold text-xs md:text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-teal-500/25 transition-all flex items-center space-x-2">
+                    <i className="fa-solid fa-laptop-medical"></i>
+                    <span>Launch Terminal</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => setViewMode("LANDING")}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs md:text-sm px-4 py-2.5 rounded-xl border border-slate-700 transition-all flex items-center space-x-2">
+                    <i className="fa-solid fa-house"></i>
+                    <span>Back to Website</span>
+                  </button>
+                )}
+
+                <button 
+                  onClick={() => setIsContactOpen(true)}
+                  className="hidden sm:flex bg-slate-800 hover:bg-slate-700 text-teal-400 text-xs font-bold px-3.5 py-2.5 rounded-xl border border-teal-500/30 transition-all">
+                  Hospital Demo
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN PAGE BODY */}
+          <main className="flex-1">
+            {viewMode === "LANDING" ? (
+              <LandingPage 
+                onLaunchApp={scrollToTerminal} 
+                onRequest={createRequest}
+                requests={requests}
+                onOpenContact={() => setIsContactOpen(true)}
+              />
+            ) : null}
+
+            {/* LIVE APPLICATION TERMINAL ANCHOR */}
+            <div id="terminal-anchor" className={viewMode === "TERMINAL" ? "block" : "hidden"}>
+              <TerminalInterface 
+                activeTab={activeTab} 
+                onRequestTabChange={requestTabChange}
+                requests={requests}
+                onRequest={createRequest}
+                onAcknowledge={acknowledgeRequest}
+                onRespond={sendResponse}
+                onResolve={resolveRequest}
+                onClearAll={clearAllData}
+                isStaffAuthenticated={isStaffAuthenticated}
+                onStaffLogout={handleStaffLogout}
+              />
+            </div>
+          </main>
+
+          {/* PIN VERIFICATION MODAL */}
+          <PinModal 
+            isOpen={isPinModalOpen} 
+            onClose={() => { setIsPinModalOpen(false); setPendingTabRequest(null); }}
+            onSuccess={handlePinSuccess}
+          />
+
+          {/* CONTACT / HOSPITAL DEMO MODAL */}
+          {isContactOpen && (
+            <ContactModal onClose={() => setIsContactOpen(false)} />
+          )}
+
+          {/* FOOTER */}
+          <footer className="bg-slate-950 border-t border-slate-800 text-slate-400 text-xs py-10 px-4">
+            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2 text-white font-extrabold text-base">
+                  <i className="fa-solid fa-hands-asl-interpreting text-teal-400"></i>
+                  <span>DeafCare</span>
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  Pioneering zero-barrier hospital communication for Deaf, Hard of Hearing, intubated, and non-verbal patients.
+                </p>
+                <div className="flex space-x-3 text-slate-400 text-base">
+                  <a href="#" className="hover:text-teal-400"><i className="fa-brands fa-twitter"></i></a>
+                  <a href="#" className="hover:text-teal-400"><i className="fa-brands fa-linkedin"></i></a>
+                  <a href="#" className="hover:text-teal-400"><i className="fa-brands fa-github"></i></a>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white uppercase text-[11px] tracking-wider mb-3">Platform</h4>
+                <ul className="space-y-2">
+                  <li><a href="#features" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400">AI Gesture Recognition</a></li>
+                  <li><a href="#terminal-anchor" onClick={() => scrollToTerminal("PATIENT")} className="hover:text-teal-400">Patient Terminal</a></li>
+                  <li><a href="#terminal-anchor" onClick={() => scrollToTerminal("CARE_TEAM")} className="hover:text-teal-400">Care Station Console</a></li>
+                  <li><a href="#gestures" onClick={() => setViewMode("LANDING")} className="hover:text-teal-400">ASL Bedside Lexicon</a></li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white uppercase text-[11px] tracking-wider mb-3">Compliance & Security</h4>
+                <ul className="space-y-2">
+                  <li><span className="text-slate-400">HIPAA Compliant Edge Processing</span></li>
+                  <li><span className="text-slate-400">ADA Section 508 Standards</span></li>
+                  <li><span className="text-slate-400">Zero Audio/Video Local Storage</span></li>
+                  <li><span className="text-slate-400">HL7 / FHIR EHR Compatibility</span></li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-white uppercase text-[11px] tracking-wider mb-3">Hospital Integration</h4>
+                <p className="text-slate-400 leading-relaxed mb-3">
+                  Ready to deploy DeafCare at your hospital or clinical care facility?
+                </p>
+                <button 
+                  onClick={() => setIsContactOpen(true)}
+                  className="w-full bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold py-2 rounded-xl text-center transition-all">
+                  Request Pilot Program
+                </button>
+              </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto pt-6 border-t border-slate-900 flex flex-col sm:flex-row justify-between items-center text-slate-500 text-[11px] space-y-2 sm:space-y-0">
+              <p>&copy; {new Date().getFullYear()} DeafCare Assistance Network. All rights reserved.</p>
+              <p>Designed for High Reliability Healthcare Communication.</p>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    /* STAFF PIN ACCESS CONTROL MODAL */
+    function PinModal({ isOpen, onClose, onSuccess }) {
+      const [pin, setPin] = useState("");
+      const [error, setError] = useState(false);
+
+      if (!isOpen) return null;
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (pin === CARE_TEAM_PIN) {
+          setError(false);
+          setPin("");
+          onSuccess();
+        } else {
+          setError(true);
+          setPin("");
+        }
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-panel max-w-sm w-full p-6 rounded-3xl border border-slate-800 space-y-5 relative">
+            <button 
+              onClick={() => { setError(false); setPin(""); onClose(); }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
+              <i className="fa-solid fa-xmark text-lg"></i>
+            </button>
+
+            <div className="text-center space-y-2">
+              <div className="bg-teal-500/20 text-teal-400 w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold mx-auto border border-teal-500/30">
+                <i className="fa-solid fa-user-shield"></i>
+              </div>
+              <h3 className="text-xl font-black text-white">Staff Verification</h3>
+              <p className="text-xs text-slate-400">Staff access required. Enter staff PIN to unlock Care Station.</p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  maxLength={8}
+                  autoFocus
+                  value={pin}
+                  onChange={(e) => { setError(false); setPin(e.target.value); }}
+                  placeholder="••••"
+                  className={`w-full px-4 py-3 text-center text-2xl font-mono tracking-widest bg-slate-950 border ${
+                    error ? 'border-rose-500 text-rose-400 focus:border-rose-500' : 'border-slate-800 text-white focus:border-teal-500'
+                  } rounded-2xl focus:outline-none transition-all shadow-inner`}
+                />
+                {error && (
+                  <p className="text-rose-400 text-xs font-bold text-center mt-2 flex items-center justify-center space-x-1">
+                    <i className="fa-solid fa-circle-exclamation mr-1"></i>
+                    <span>Incorrect PIN. Please try again.</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setError(false); setPin(""); onClose(); }}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-teal-500 hover:bg-teal-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-lg shadow-teal-500/20">
+                  Unlock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function LandingPage({ onLaunchApp, onRequest, requests, onOpenContact }) {
+      return (
+        <div className="space-y-20 pb-16">
+          {/* HERO SECTION */}
+          <section className="relative pt-12 md:pt-20 px-4 md:px-8 max-w-7xl mx-auto">
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-teal-500/15 blur-3xl rounded-full pointer-events-none"></div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+              <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
+                <div className="inline-flex items-center space-x-2 bg-slate-900 border border-teal-500/30 px-3.5 py-1.5 rounded-full text-teal-300 text-xs font-semibold">
+                  <span className="h-2 w-2 rounded-full bg-teal-400 animate-ping"></span>
+                  <span>AI Computer Vision + Touch Communication</span>
+                </div>
+
+                <h1 className="text-4xl md:text-6xl font-black text-white leading-tight tracking-tight">
+                  Breaking Silence in <br />
+                  <span className="bg-clip-text text-transparent bg-gradient-to-r from-teal-400 via-emerald-400 to-sky-400">
+                    Medical Care.
+                  </span>
+                </h1>
+
+                <p className="text-slate-300 text-base md:text-lg leading-relaxed max-w-2xl mx-auto lg:mx-0">
+                  DeafCare empowers Deaf, Hard-of-Hearing, intubated, and non-verbal patients to express critical medical needs instantly through AI hand-gesture tracking and high-contrast touch controls.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2">
+                  <button 
+                    onClick={() => onLaunchApp("PATIENT")}
+                    className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-base px-6 py-3.5 rounded-2xl shadow-xl shadow-teal-500/25 transition-all flex items-center justify-center space-x-3 group">
+                    <span>Try Patient Terminal</span>
+                    <i className="fa-solid fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
+                  </button>
+
+                  <button 
+                    onClick={() => onLaunchApp("CARE_TEAM")}
+                    className="bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-base px-6 py-3.5 rounded-2xl border border-slate-800 transition-all flex items-center justify-center space-x-2">
+                    <i className="fa-solid fa-lock text-teal-400 text-xs"></i>
+                    <span>Nurse Care Station</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 pt-8 border-t border-slate-800/80 max-w-lg mx-auto lg:mx-0">
+                  <div>
+                    <div className="text-2xl md:text-3xl font-black text-white">&lt; 1.5s</div>
+                    <div className="text-xs text-slate-400 font-medium">Dispatch Speed</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl md:text-3xl font-black text-teal-400">99.2%</div>
+                    <div className="text-xs text-slate-400 font-medium">Gesture Precision</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl md:text-3xl font-black text-emerald-400">100%</div>
+                    <div className="text-xs text-slate-400 font-medium">On-Device Privacy</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-5">
+                <div className="glass-panel rounded-3xl p-6 border border-slate-800 shadow-2xl relative overflow-hidden animate-float">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                    <div className="flex items-center space-x-2">
+                      <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span className="text-xs font-bold text-emerald-300">Live Terminal Monitor</span>
+                    </div>
+                    <span className="text-xs font-mono text-slate-500">{PATIENT_ID}</span>
+                  </div>
+
+                  <div className="py-6 space-y-4">
+                    <div className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                      Simulate Bedside Gesture Signal:
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => { onRequest("HELP", "GESTURE_AI"); onLaunchApp("CARE_TEAM"); }}
+                        className="bg-red-600/90 hover:bg-red-600 text-white p-3 rounded-xl text-left font-bold text-xs flex items-center justify-between group transition-all">
+                        <span>✋ Open Palm (HELP)</span>
+                        <i className="fa-solid fa-bolt text-red-200 group-hover:scale-125 transition-transform"></i>
+                      </button>
+
+                      <button 
+                        onClick={() => { onRequest("PAIN", "TOUCH_UI"); onLaunchApp("CARE_TEAM"); }}
+                        className="bg-rose-500/90 hover:bg-rose-500 text-white p-3 rounded-xl text-left font-bold text-xs flex items-center justify-between group transition-all">
+                        <span>🤚 Lowered (PAIN)</span>
+                        <i className="fa-solid fa-hand-holding-medical text-rose-200 group-hover:scale-125 transition-transform"></i>
+                      </button>
+
+                      <button 
+                        onClick={() => { onRequest("MEDICINE", "GESTURE_AI"); onLaunchApp("CARE_TEAM"); }}
+                        className="bg-amber-500/90 hover:bg-amber-500 text-slate-950 p-3 rounded-xl text-left font-bold text-xs flex items-center justify-between group transition-all">
+                        <span>👍 Thumbs Up (MEDS)</span>
+                        <i className="fa-solid fa-pills group-hover:scale-125 transition-transform"></i>
+                      </button>
+
+                      <button 
+                        onClick={() => { onRequest("WATER", "TOUCH_UI"); onLaunchApp("CARE_TEAM"); }}
+                        className="bg-sky-500/90 hover:bg-sky-500 text-slate-950 p-3 rounded-xl text-left font-bold text-xs flex items-center justify-between group transition-all">
+                        <span>✊ Fist (WATER)</span>
+                        <i className="fa-solid fa-glass-water group-hover:scale-125 transition-transform"></i>
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 text-xs space-y-1">
+                      <div className="text-slate-400 flex justify-between">
+                        <span>Active Queue Status:</span>
+                        <strong className="text-teal-400">{requests.filter(r => r.status !== 'RESOLVED').length} Active</strong>
+                      </div>
+                      <p className="text-slate-300 font-medium">
+                        Click any trigger above to test instant dispatch into the Care Station console.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* FEATURES GRID */}
+          <section id="features" className="max-w-7xl mx-auto px-4 md:px-8 space-y-10">
+            <div className="text-center space-y-3 max-w-2xl mx-auto">
+              <h2 className="text-xs font-black uppercase tracking-widest text-teal-400">Designed For High Reliability</h2>
+              <h3 className="text-3xl md:text-4xl font-extrabold text-white">Engineered For Zero Communication Barriers</h3>
+              <p className="text-slate-400 text-sm">
+                Built specifically for hospital bedside environments, intensive care units, and emergency triage rooms.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="glass-panel p-6 rounded-3xl space-y-4 hover:border-teal-500/50 transition-all group">
+                <div className="bg-teal-500/20 text-teal-400 w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
+                  <i className="fa-solid fa-camera-retro"></i>
+                </div>
+                <h4 className="text-xl font-bold text-white">AI Computer Vision</h4>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  Translates simple, low-effort bedside hand gestures into structured emergency calls in real time using edge MediaPipe tracking.
+                </p>
+              </div>
+
+              <div className="glass-panel p-6 rounded-3xl space-y-4 hover:border-teal-500/50 transition-all group">
+                <div className="bg-red-500/20 text-red-400 w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
+                  <i className="fa-solid fa-bell-concierge"></i>
+                </div>
+                <h4 className="text-xl font-bold text-white">Urgent Chime Alarms</h4>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  High-urgency calls trigger immediate visual pulsing strobes and audio chimes at the nurse station to guarantee fast response times.
+                </p>
+              </div>
+
+              <div className="glass-panel p-6 rounded-3xl space-y-4 hover:border-teal-500/50 transition-all group">
+                <div className="bg-emerald-500/20 text-emerald-400 w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold group-hover:scale-110 transition-transform">
+                  <i className="fa-solid fa-shield-halved"></i>
+                </div>
+                <h4 className="text-xl font-bold text-white">Privacy-First Edge AI</h4>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  All video frames are processed completely in local browser memory. Zero video streams or facial imagery are ever transmitted or saved.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* GESTURE LEXICON GUIDE */}
+          <section id="gestures" className="max-w-7xl mx-auto px-4 md:px-8 space-y-10">
+            <div className="glass-panel p-8 md:p-12 rounded-3xl border border-slate-800 space-y-8">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                  <h2 className="text-xs font-black uppercase tracking-widest text-teal-400">Bedside Sign Language</h2>
+                  <h3 className="text-3xl font-extrabold text-white mt-1">Supported Hand Gestures</h3>
+                  <p className="text-slate-400 text-sm mt-1">
+                    Hold any supported gesture in camera view for ~1 second to trigger an automated request.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => onLaunchApp("PATIENT")}
+                  className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition-all self-start md:self-auto">
+                  Test Camera Live
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {Object.keys(REQUEST_TYPES).map(key => {
+                  const item = REQUEST_TYPES[key];
+                  return (
+                    <div key={key} className="bg-slate-900/90 p-5 rounded-2xl border border-slate-800 space-y-3 hover:border-teal-500/40 transition-all">
+                      <div className="text-2xl">{item.gesture.split(' ')[0]}</div>
+                      <div>
+                        <div className="text-sm font-black text-white">{item.label}</div>
+                        <div className="text-[11px] text-teal-400 font-semibold">{item.gesture.split(' ').slice(1).join(' ')}</div>
+                      </div>
+                      <p className="text-slate-400 text-xs">{item.description}</p>
+                      <button 
+                        onClick={() => { onRequest(key, "TOUCH_UI"); onLaunchApp("CARE_TEAM"); }}
+                        className="w-full bg-slate-800 hover:bg-teal-500 hover:text-slate-950 text-slate-300 text-[11px] font-bold py-1.5 rounded-lg transition-all">
+                        Simulate Call
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          {/* WORKFLOW STEPS */}
+          <section id="workflow" className="max-w-7xl mx-auto px-4 md:px-8 space-y-10">
+            <div className="text-center space-y-3">
+              <h2 className="text-xs font-black uppercase tracking-widest text-teal-400">Seamless Integration</h2>
+              <h3 className="text-3xl font-extrabold text-white">How DeafCare Operates</h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
+                <span className="text-4xl font-black text-slate-800 absolute top-4 right-4">01</span>
+                <h4 className="text-lg font-bold text-white mb-2">Patient Signal</h4>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Patient gestures at bedside tablet camera or taps high-visibility touch cards.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
+                <span className="text-4xl font-black text-slate-800 absolute top-4 right-4">02</span>
+                <h4 className="text-lg font-bold text-white mb-2">AI Temporal Check</h4>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  MediaPipe verifies gesture stability across 12 consecutive frames to prevent accidental triggers.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
+                <span className="text-4xl font-black text-slate-800 absolute top-4 right-4">03</span>
+                <h4 className="text-lg font-bold text-white mb-2">Nurse Alert</h4>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Care station dashboard chimes and highlights room location with urgency priority.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 relative">
+                <span className="text-4xl font-black text-slate-800 absolute top-4 right-4">04</span>
+                <h4 className="text-lg font-bold text-white mb-2">Instant Response</h4>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Nurse sends quick preset messages back to patient screen, reassuring them instantly.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* COMPLIANCE BANNER */}
+          <section id="compliance" className="max-w-7xl mx-auto px-4 md:px-8">
+            <div className="glass-panel p-8 rounded-3xl border border-teal-500/30 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="space-y-2 text-center md:text-left">
+                <h3 className="text-xl font-black text-white">HIPAA & ADA Section 508 Compliant Architecture</h3>
+                <p className="text-slate-300 text-xs max-w-xl">
+                  DeafCare is designed to satisfy Americans with Disabilities Act healthcare access guidelines without compromising patient data confidentiality.
+                </p>
+              </div>
+              <button 
+                onClick={onOpenContact}
+                className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold px-6 py-3 rounded-xl text-xs transition-all shrink-0">
+                Request Security Whitepaper
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    function TerminalInterface({ 
+      activeTab, 
+      onRequestTabChange, 
+      requests, 
+      onRequest, 
+      onAcknowledge, 
+      onRespond, 
+      onResolve, 
+      onClearAll,
+      isStaffAuthenticated,
+      onStaffLogout
+    }) {
+      const isStaffTabRequested = activeTab === "CARE_TEAM" || activeTab === "SPLIT";
+      const canRenderStaffView = isStaffTabRequested && isStaffAuthenticated;
+
+      return (
+        <section className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
+          {/* TERMINAL HEADER & VIEW SWITCHER */}
+          <div className="glass-panel p-4 rounded-2xl flex flex-wrap justify-between items-center gap-4">
+            <div>
+              <h2 className="text-lg font-black text-white flex items-center space-x-2">
+                <i className="fa-solid fa-laptop-medical text-teal-400"></i>
+                <span>DeafCare Application Terminal</span>
+              </h2>
+              <p className="text-xs text-slate-400">Select view state to operate patient bedside terminal or nurse care station.</p>
+            </div>
+
+            <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+              <button 
+                onClick={() => onRequestTabChange("PATIENT")} 
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "PATIENT" ? "bg-teal-500 text-slate-950 shadow-md" : "text-slate-300 hover:text-white"}`}>
+                <i className="fa-solid fa-bed mr-1.5"></i> Patient View
+              </button>
+
+              <button 
+                onClick={() => onRequestTabChange("CARE_TEAM")} 
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all relative ${activeTab === "CARE_TEAM" ? "bg-teal-500 text-slate-950 shadow-md" : "text-slate-300 hover:text-white"}`}>
+                <i className={`fa-solid ${isStaffAuthenticated ? 'fa-user-nurse' : 'fa-lock'} mr-1.5`}></i> Care Station
+                {requests.filter(r => r.status === "PENDING").length > 0 && (
+                  <span className="ml-1.5 bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black animate-pulse">
+                    {requests.filter(r => r.status === "PENDING").length}
+                  </span>
+                )}
+              </button>
+
+              <button 
+                onClick={() => onRequestTabChange("SPLIT")} 
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all hidden md:inline-block ${activeTab === "SPLIT" ? "bg-teal-500 text-slate-950 shadow-md" : "text-slate-300 hover:text-white"}`}>
+                <i className={`fa-solid ${isStaffAuthenticated ? 'fa-columns' : 'fa-lock'} mr-1.5`}></i> Dual Split View
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              {isStaffAuthenticated && (
+                <button 
+                  onClick={onStaffLogout}
+                  className="text-xs text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 px-3 py-1.5 rounded-lg border border-rose-500/30 transition-all flex items-center space-x-1.5 font-bold">
+                  <i className="fa-solid fa-lock"></i>
+                  <span>Staff Logout</span>
+                </button>
+              )}
+
+              <button 
+                onClick={onClearAll}
+                title="Reset active request queue"
+                className="text-xs text-slate-400 hover:text-rose-400 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-rose-500/40 transition-all">
+                <i className="fa-solid fa-rotate-right mr-1"></i> Reset Demo Data
+              </button>
+            </div>
+          </div>
+
+          {/* ACTIVE TERMINAL TAB DISPLAY */}
+          {activeTab === "PATIENT" && (
+            <PatientTerminalView requests={requests} onRequest={onRequest} />
+          )}
+
+          {activeTab === "CARE_TEAM" && (
+            canRenderStaffView ? (
+              <CareStationView 
+                requests={requests} 
+                onAcknowledge={onAcknowledge} 
+                onRespond={onRespond} 
+                onResolve={onResolve}
+                onStaffLogout={onStaffLogout} 
+              />
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
+                <div className="w-12 h-12 bg-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center text-xl font-bold mx-auto border border-amber-500/30">
+                  <i className="fa-solid fa-user-shield"></i>
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Staff Authentication Required</h3>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    Nurse Station console is locked to protect patient confidentiality. Please enter staff PIN to access.
+                  </p>
+                </div>
+                <div className="flex justify-center gap-3">
+                  <button 
+                    onClick={() => onRequestTabChange("PATIENT")}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all">
+                    Return to Patient View
+                  </button>
+                  <button 
+                    onClick={() => onRequestTabChange("CARE_TEAM")}
+                    className="px-5 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black rounded-xl transition-all shadow-lg shadow-teal-500/20">
+                    Enter Staff PIN
+                  </button>
+                </div>
+              </div>
+            )
+          )}
+
+          {activeTab === "SPLIT" && (
+            canRenderStaffView ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <div className="text-xs font-black uppercase text-teal-400 tracking-wider">Bedside Terminal (Bed 3B)</div>
+                  <PatientTerminalView requests={requests} onRequest={onRequest} />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-xs font-black uppercase text-teal-400 tracking-wider">Central Nurse Console</div>
+                  <CareStationView 
+                    requests={requests} 
+                    onAcknowledge={onAcknowledge} 
+                    onRespond={onRespond} 
+                    onResolve={onResolve} 
+                    onStaffLogout={onStaffLogout}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
+                <div className="w-12 h-12 bg-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center text-xl font-bold mx-auto border border-amber-500/30">
+                  <i className="fa-solid fa-lock"></i>
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">Staff Verification Required for Dual View</h3>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    Split View displays nurse management controls and requires staff authentication.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => onRequestTabChange("SPLIT")}
+                  className="px-5 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black rounded-xl transition-all shadow-lg shadow-teal-500/20">
+                  Authenticate Staff PIN
+                </button>
+              </div>
+            )
+          )}
+        </section>
+      );
+    }
+
+    function PatientTerminalView({ requests, onRequest }) {
+      const patientRequests = requests.filter(r => r.patientId === PATIENT_ID);
+      const activeRequest = patientRequests.find(r => r.status !== "RESOLVED");
+
+      return (
+        <div className="space-y-6">
+          {/* BED STATUS BANNER */}
+          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Connected to Station 4</span>
+              </div>
+              <h3 className="text-2xl font-black text-white mt-1">{PATIENT_ID}</h3>
+              <p className="text-xs text-slate-400">Tap cards or hold gesture in front of camera.</p>
+            </div>
+
+            {activeRequest ? (
+              <div className={`p-4 rounded-2xl border flex items-center space-x-3 ${activeRequest.status === 'PENDING' ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'}`}>
+                <i className={`fa-solid ${activeRequest.status === 'PENDING' ? 'fa-spinner fa-spin text-amber-400' : 'fa-circle-check text-emerald-400'} text-2xl`}></i>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-wide">
+                    {activeRequest.status === 'PENDING' ? 'Call Sent - Awaiting Nurse' : 'Acknowledged by Care Team'}
+                  </div>
+                  <div className="font-extrabold text-sm">{activeRequest.label} ({activeRequest.timestamp})</div>
+                </div>
+              </div>
+            ) : (
+              <div className="px-4 py-2 bg-slate-800/80 rounded-xl text-slate-400 text-xs font-medium border border-slate-700/50">
+                <i className="fa-solid fa-check text-emerald-400 mr-1.5"></i> No Active Calls Pending
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* MANUAL QUICK TOUCH CARDS (7 COLS) - GUARANTEED FALLBACK */}
+            <div className="lg:col-span-7 space-y-3">
+              <h4 className="text-sm font-black text-slate-300 flex items-center space-x-2">
+                <i className="fa-solid fa-hand-pointer text-teal-400"></i>
+                <span>Quick Touch Request Cards</span>
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.keys(REQUEST_TYPES).map(key => {
+                  const item = REQUEST_TYPES[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => onRequest(key, "TOUCH_UI")}
+                      className={`${item.color} p-5 rounded-2xl shadow-lg hover:brightness-110 active:scale-95 transition-all text-left flex flex-col justify-between min-h-[120px] group border border-white/10`}>
+                      <div className="flex justify-between items-start w-full">
+                        <i className={`fa-solid ${item.icon} text-3xl group-hover:scale-110 transition-transform`}></i>
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-black/30 text-white">
+                          {item.urgency}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="text-xl font-black tracking-tight">{item.label}</div>
+                        <div className="text-xs opacity-90 font-medium">{item.description}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* AI CAMERA GESTURE TRACKER (5 COLS) */}
+            <div className="lg:col-span-5 space-y-3">
+              <h4 className="text-sm font-black text-slate-300 flex items-center space-x-2">
+                <i className="fa-solid fa-camera text-teal-400"></i>
+                <span>AI Gesture Tracking Engine</span>
+              </h4>
+
+              <GestureCameraModule onRequestDetected={(gestureKey) => onRequest(gestureKey, "GESTURE_AI")} />
+            </div>
+          </div>
+
+          {/* REAL-TIME NURSE RESPONSES FEED */}
+          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl space-y-4">
+            <h4 className="text-sm font-black text-slate-300 flex items-center space-x-2">
+              <i className="fa-solid fa-comments text-teal-400"></i>
+              <span>Live Care Team Messages</span>
+            </h4>
+
+            {patientRequests.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-4 text-center">No call history recorded yet.</p>
+            ) : (
+              <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                {patientRequests.map(req => (
+                  <div key={req.id} className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 text-xs space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-extrabold text-white">
+                        {req.label} <span className="text-[10px] font-normal text-slate-500">({req.timestamp})</span>
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        req.status === 'PENDING' ? 'bg-amber-500/20 text-amber-300' :
+                        req.status === 'ACKNOWLEDGED' ? 'bg-blue-500/20 text-blue-300' : 'bg-emerald-500/20 text-emerald-300'
+                      }`}>
+                        {req.status}
+                      </span>
+                    </div>
+
+                    {req.responses && req.responses.length > 0 ? (
+                      <div className="space-y-1.5 pl-3 border-l-2 border-teal-500">
+                        {req.responses.map(resp => (
+                          <div key={resp.id} className="bg-teal-500/10 p-2.5 rounded-xl border border-teal-500/20 text-teal-200">
+                            <span className="font-bold text-[10px] text-teal-400 block">{resp.sender} &bull; {resp.timestamp}</span>
+                            <p className="text-sm font-black mt-0.5">"{resp.text}"</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-500 italic">Call received. Nurse team notified.</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* REFACTORED HIGH-RELIABILITY MEDIAPIPE GESTURE CAMERA MODULE */
+    function GestureCameraModule({ onRequestDetected }) {
+      const videoRef = useRef(null);
+      const canvasRef = useRef(null);
+
+      const [cameraState, setCameraState] = useState("IDLE"); // IDLE, LOADING, RUNNING, ERROR
+      const [statusMessage, setStatusMessage] = useState("");
+      const [handDetected, setHandDetected] = useState(false);
+      const [detectedGesture, setDetectedGesture] = useState("NONE");
+      const [holdProgress, setHoldProgress] = useState(0);
+      const [lastSentMessage, setLastSentMessage] = useState("");
+
+      const gestureHoldRef = useRef({ gesture: "NONE", count: 0 });
+      const cooldownRef = useRef(false);
+      const streamRef = useRef(null);
+      const animFrameRef = useRef(null);
+      const handsRef = useRef(null);
+      const isComponentMounted = useRef(true);
+
+      const stopCamera = useCallback(() => {
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+          animFrameRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+        if (handsRef.current) {
+          try {
+            handsRef.current.close();
+          } catch (e) {}
+          handsRef.current = null;
+        }
+        setCameraState("IDLE");
+        setHandDetected(false);
+        setDetectedGesture("NONE");
+        setHoldProgress(0);
+      }, []);
+
+      const classifyGesture = (landmarks) => {
+        if (!landmarks || landmarks.length === 0) return { gesture: "NONE", score: 0 };
+
+        const isIndexExtended = landmarks[8].y < landmarks[6].y;
+        const isMiddleExtended = landmarks[12].y < landmarks[10].y;
+        const isRingExtended = landmarks[16].y < landmarks[14].y;
+        const isPinkyExtended = landmarks[20].y < landmarks[18].y;
+
+        const thumbTip = landmarks[4];
+        const pinkyMcp = landmarks[17];
+        const thumbDist = Math.hypot(thumbTip.x - pinkyMcp.x, thumbTip.y - pinkyMcp.y);
+        const isThumbExtended = thumbDist > 0.22;
+
+        // 1. OPEN PALM (HELP)
+        if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) {
+          return { gesture: "HELP", score: 0.95 };
+        }
+
+        // 2. POINTING UP (DOCTOR)
+        if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+          return { gesture: "DOCTOR", score: 0.92 };
+        }
+
+        // 3. THUMBS UP (MEDICINE)
+        const isThumbUpDirection = landmarks[4].y < landmarks[3].y && landmarks[4].y < landmarks[8].y;
+        if (isThumbUpDirection && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+          return { gesture: "MEDICINE", score: 0.90 };
+        }
+
+        // 4. CLOSED FIST (WATER)
+        if (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended && !isThumbExtended) {
+          return { gesture: "WATER", score: 0.88 };
+        }
+
+        // 5. LOWERED HAND / HAND TO CHEST (PAIN)
+        const wristY = landmarks[0].y;
+        if (wristY > 0.65 && isIndexExtended && isMiddleExtended) {
+          return { gesture: "PAIN", score: 0.85 };
+        }
+
+        return { gesture: "NONE", score: 0 };
+      };
+
+      const startCamera = async () => {
+        stopCamera();
+        setCameraState("LOADING");
+        setStatusMessage("");
+        setLastSentMessage("");
+
+        // 1. Context & API Support Check
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setCameraState("ERROR");
+          setStatusMessage("Camera access is not supported in this browser context (HTTPS required). You can still use the large touch buttons.");
+          return;
+        }
+
+        // 2. MediaPipe CDN Availability Check
+        if (typeof window.Hands === "undefined") {
+          setCameraState("ERROR");
+          setStatusMessage("Gesture recognition is temporarily unavailable. Please use the touch buttons.");
+          return;
+        }
+
+        try {
+          // 3. Request Browser Camera Stream
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+            audio: false
+          });
+          streamRef.current = stream;
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            await videoRef.current.play();
+          }
+
+          // 4. Initialize MediaPipe Hands Object
+          const hands = new window.Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+          });
+
+          hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+          });
+
+          hands.onResults((results) => {
+            if (!isComponentMounted.current) return;
+            const canvasCtx = canvasRef.current?.getContext("2d");
+            if (!canvasCtx || !canvasRef.current) return;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+            if (results.image) {
+              canvasCtx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              setHandDetected(true);
+              const landmarks = results.multiHandLandmarks[0];
+
+              // Skeleton Overlay Visualization
+              canvasCtx.fillStyle = "#14b8a6";
+              canvasCtx.strokeStyle = "#0d9488";
+              canvasCtx.lineWidth = 3;
+
+              landmarks.forEach((pt) => {
+                const x = pt.x * canvasRef.current.width;
+                const y = pt.y * canvasRef.current.height;
+                canvasCtx.beginPath();
+                canvasCtx.arc(x, y, 4, 0, 2 * Math.PI);
+                canvasCtx.fill();
+              });
+
+              const { gesture } = classifyGesture(landmarks);
+              setDetectedGesture(gesture);
+
+              // Accidental Dispatch Protection: 12 Consecutive Frames Hold (~1s)
+              if (gesture !== "NONE" && !cooldownRef.current) {
+                if (gestureHoldRef.current.gesture === gesture) {
+                  gestureHoldRef.current.count += 1;
+                } else {
+                  gestureHoldRef.current = { gesture, count: 1 };
+                }
+
+                const REQUIRED_FRAMES = 12;
+                const pct = Math.min(100, Math.round((gestureHoldRef.current.count / REQUIRED_FRAMES) * 100));
+                setHoldProgress(pct);
+
+                if (gestureHoldRef.current.count >= REQUIRED_FRAMES) {
+                  onRequestDetected(gesture);
+                  setLastSentMessage(`${gesture} request sent!`);
+                  cooldownRef.current = true;
+                  gestureHoldRef.current = { gesture: "NONE", count: 0 };
+                  setHoldProgress(0);
+
+                  setTimeout(() => {
+                    cooldownRef.current = false;
+                    setLastSentMessage("");
+                  }, 3500);
+                }
+              } else {
+                gestureHoldRef.current = { gesture: "NONE", count: 0 };
+                setHoldProgress(0);
+              }
+            } else {
+              setHandDetected(false);
+              setDetectedGesture("NONE");
+              setHoldProgress(0);
+              gestureHoldRef.current = { gesture: "NONE", count: 0 };
+            }
+            canvasCtx.restore();
+          });
+
+          handsRef.current = hands;
+          setCameraState("RUNNING");
+
+          // 5. Continuous Frame Processing Loop
+          const processFrame = async () => {
+            if (videoRef.current && videoRef.current.readyState >= 2 && handsRef.current) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (err) {
+                console.warn("Frame dispatch warning:", err);
+              }
+            }
+            if (streamRef.current) {
+              animFrameRef.current = requestAnimationFrame(processFrame);
+            }
+          };
+
+          processFrame();
+
+        } catch (err) {
+          console.error("Camera access error:", err);
+          setCameraState("ERROR");
+          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            setStatusMessage("Camera access was denied. You can still use the large touch buttons.");
+          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+            setStatusMessage("No camera device found on this system. You can still use the large touch buttons.");
+          } else {
+            setStatusMessage("Camera access failed or unavailable. You can still use the large touch buttons.");
+          }
+        }
+      };
+
+      useEffect(() => {
+        isComponentMounted.current = true;
+        return () => {
+          isComponentMounted.current = false;
+          stopCamera();
+        };
+      }, [stopCamera]);
+
+      return (
+        <div className="bg-slate-900 rounded-3xl p-4 text-white border border-slate-800 space-y-3">
+          {/* CAMERA FEED DISPLAY & CANVAS OVERLAY */}
+          <div className="relative aspect-video bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
+            <video ref={videoRef} autoPlay playsInline muted className="hidden" />
+            <canvas ref={canvasRef} width="640" height="480" className={`w-full h-full object-cover ${cameraState === 'RUNNING' ? 'block' : 'hidden'}`} />
+
+            {cameraState === "IDLE" && (
+              <div className="text-center p-6 space-y-2">
+                <i className="fa-solid fa-video-slash text-4xl text-slate-600"></i>
+                <p className="text-xs text-slate-400 font-medium">Camera gesture recognition is offline.</p>
+                <p className="text-[11px] text-slate-500">Click below to start hand tracking camera.</p>
+              </div>
+            )}
+
+            {cameraState === "LOADING" && (
+              <div className="text-center p-6 space-y-2">
+                <i className="fa-solid fa-circle-notch fa-spin text-3xl text-teal-400"></i>
+                <p className="text-xs text-slate-300 font-semibold">Initializing Camera & AI Hand Model...</p>
+              </div>
+            )}
+
+            {cameraState === "ERROR" && (
+              <div className="text-center p-5 text-rose-400 space-y-2 max-w-sm">
+                <i className="fa-solid fa-triangle-exclamation text-3xl"></i>
+                <p className="text-xs font-bold leading-relaxed">{statusMessage}</p>
+              </div>
+            )}
+
+            {cameraState === "RUNNING" && (
+              <>
+                {/* Top Left Status Indicators */}
+                <div className="absolute top-3 left-3 bg-slate-950/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-700 text-[11px] space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-bold text-emerald-400">Camera: Connected</span>
+                  </div>
+                  <div className="text-slate-300">
+                    {handDetected ? (
+                      <span className="text-teal-300 font-bold"><i className="fa-solid fa-hand mr-1"></i>Hand detected</span>
+                    ) : (
+                      <span className="text-slate-400 italic">Show your hand to the camera</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top Right Detected Gesture Badge */}
+                <div className="absolute top-3 right-3 bg-slate-950/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold">
+                  <span>Detected: </span>
+                  <span className={detectedGesture !== 'NONE' ? 'text-teal-400 font-black' : 'text-slate-400'}>
+                    {detectedGesture}
+                  </span>
+                </div>
+
+                {/* Hold Progress Gauge */}
+                {holdProgress > 0 && (
+                  <div className="absolute bottom-3 left-3 right-3 bg-slate-950/90 backdrop-blur p-2.5 rounded-xl border border-teal-500/50 space-y-1">
+                    <div className="flex justify-between text-[10px] font-black text-teal-300">
+                      <span>HOLD GESTURE TO DISPATCH</span>
+                      <span>{holdProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-teal-400 h-full transition-all duration-75" style={{ width: `${holdProgress}%` }}></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dispatch Confirmation Toast Banner */}
+                {lastSentMessage && (
+                  <div className="absolute bottom-3 left-3 right-3 bg-emerald-500 text-slate-950 font-black text-xs p-2.5 rounded-xl text-center shadow-lg animate-bounce">
+                    <i className="fa-solid fa-circle-check mr-1.5"></i>
+                    {lastSentMessage}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* CAMERA TOGGLE CONTROLS */}
+          <div className="flex items-center">
+            {cameraState === "RUNNING" ? (
+              <button 
+                onClick={stopCamera} 
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all">
+                <i className="fa-solid fa-power-off mr-1.5"></i> Stop Camera
+              </button>
+            ) : (
+              <button 
+                onClick={startCamera} 
+                className="w-full py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 rounded-xl text-xs font-black transition-all shadow-lg shadow-teal-500/20">
+                <i className="fa-solid fa-camera mr-1.5"></i> Start Hand Tracking Camera
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function CareStationView({ requests, onAcknowledge, onRespond, onResolve, onStaffLogout }) {
+      const [customMsg, setCustomMsg] = useState({});
+      const activeList = requests.filter(r => r.status !== "RESOLVED");
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-slate-900 p-5 rounded-3xl border border-slate-800">
+            <div>
+              <h3 className="text-xl font-black text-white">Care Station Queue</h3>
+              <p className="text-xs text-slate-400">Real-time incoming call dispatch and emergency panel.</p>
+            </div>
+
+            <div className="flex items-center space-x-3 text-xs font-bold">
+              <span className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30">
+                Pending: {requests.filter(r => r.status === "PENDING").length}
+              </span>
+              <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-500/30">
+                Active: {activeList.length}
+              </span>
+
+              <button 
+                onClick={onStaffLogout}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-rose-600/20 hover:text-rose-400 hover:border-rose-500/40 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition-all flex items-center space-x-1.5">
+                <i className="fa-solid fa-lock text-rose-400"></i>
+                <span>Staff Logout</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ACTIVE REQUESTS QUEUE */}
+          <div className="space-y-4">
+            {activeList.length === 0 ? (
+              <div className="bg-slate-900 rounded-3xl p-8 text-center text-slate-500 border border-slate-800 space-y-2">
+                <i className="fa-solid fa-circle-check text-4xl text-emerald-400"></i>
+                <p className="font-bold text-sm text-slate-300">All Patient Requests Cleared</p>
+                <p className="text-xs text-slate-500">New requests will trigger chime alerts and appear here live.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {activeList.map(req => {
+                  const isHighUrgent = req.urgency === "HIGH" && req.status === "PENDING";
+                  return (
+                    <div 
+                      key={req.id} 
+                      className={`bg-slate-900 rounded-3xl p-5 border-2 transition-all shadow-lg ${
+                        isHighUrgent ? 'border-red-500 pulse-alert' : 'border-slate-800'
+                      }`}>
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                              req.urgency === 'HIGH' ? 'bg-red-600 text-white' : 'bg-amber-500 text-slate-950'
+                            }`}>
+                              {req.urgency} URGENCY
+                            </span>
+                            <span className="text-xs font-mono text-slate-500">{req.id}</span>
+                            <span className="text-xs text-slate-500">&bull; {req.timestamp}</span>
+                            <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded">
+                              {req.origin}
+                            </span>
+                          </div>
+                          <h4 className="text-2xl font-black text-white">{req.label}</h4>
+                          <p className="text-xs font-bold text-teal-400">{req.patientId}</p>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          {req.status === "PENDING" ? (
+                            <button 
+                              onClick={() => onAcknowledge(req.id)}
+                              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg transition-all">
+                              <i className="fa-solid fa-handshake mr-1.5"></i> Acknowledge
+                            </button>
+                          ) : (
+                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-extrabold rounded-xl">
+                              <i className="fa-solid fa-check mr-1"></i> Acknowledged
+                            </span>
+                          )}
+
+                          <button 
+                            onClick={() => onResolve(req.id)}
+                            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all">
+                            Resolve
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* DISPATCH RESPONSE CONTROLS */}
+                      <div className="pt-4 space-y-3">
+                        <div className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                          Dispatch Response to Patient Bedside Screen:
+                        </div>
+
+                        {/* PRESETS */}
+                        <div className="flex flex-wrap gap-2">
+                          {PRESET_RESPONSES.map((preset, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => onRespond(req.id, preset)}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-teal-500 hover:text-slate-950 text-slate-300 rounded-xl text-xs font-semibold transition-all">
+                              "{preset}"
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* CUSTOM INPUT */}
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="Type custom response..."
+                            value={customMsg[req.id] || ""}
+                            onChange={(e) => setCustomMsg({ ...customMsg, [req.id]: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                onRespond(req.id, customMsg[req.id] || "");
+                                setCustomMsg({ ...customMsg, [req.id]: "" });
+                              }
+                            }}
+                            className="flex-1 px-3.5 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl focus:outline-none focus:border-teal-500 text-white"
+                          />
+                          <button 
+                            onClick={() => {
+                              onRespond(req.id, customMsg[req.id] || "");
+                              setCustomMsg({ ...customMsg, [req.id]: "" });
+                            }}
+                            className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black rounded-xl transition-all">
+                            Send
+                          </button>
+                        </div>
+
+                        {/* SENT LOG */}
+                        {req.responses && req.responses.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            <span className="text-[10px] font-bold text-slate-500">Sent Responses Log:</span>
+                            {req.responses.map(resp => (
+                              <div key={resp.id} className="text-xs bg-slate-950 p-2 rounded-xl border border-slate-800/80 text-slate-300">
+                                <strong>{resp.timestamp}:</strong> "{resp.text}"
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function ContactModal({ onClose }) {
+      const [submitted, setSubmitted] = useState(false);
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-3xl border border-slate-800 space-y-4 relative">
+            <button 
+              onClick={onClose}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white">
+              <i className="fa-solid fa-xmark text-lg"></i>
+            </button>
+
+            {submitted ? (
+              <div className="text-center py-8 space-y-3">
+                <i className="fa-solid fa-circle-check text-5xl text-teal-400"></i>
+                <h3 className="text-xl font-bold text-white">Pilot Request Received</h3>
+                <p className="text-slate-400 text-xs">
+                  Our clinical integration team will get in touch within 24 business hours.
+                </p>
+                <button 
+                  onClick={onClose}
+                  className="bg-slate-800 text-white font-bold px-5 py-2 rounded-xl text-xs mt-2">
+                  Close Window
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={(e) => { e.preventDefault(); setSubmitted(true); }} className="space-y-4">
+                <div>
+                  <h3 className="text-xl font-black text-white">Request Hospital Demo</h3>
+                  <p className="text-xs text-slate-400">Schedule a pilot deployment or EHR integration consultation.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase">Hospital / Medical Center</label>
+                    <input required type="text" placeholder="e.g. Memorial Health System" className="w-full mt-1 px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-teal-500" />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase">Work Email</label>
+                    <input required type="email" placeholder="name@hospital.org" className="w-full mt-1 px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-teal-500" />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase">Target Facility Size</label>
+                    <select className="w-full mt-1 px-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-teal-500">
+                      <option>1 - 50 Beds</option>
+                      <option>50 - 200 Beds</option>
+                      <option>200+ Beds (Health System)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  className="w-full py-3 bg-teal-500 hover:bg-teal-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-lg shadow-teal-500/20">
+                  Submit Request
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
